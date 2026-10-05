@@ -26,7 +26,7 @@ env:
 
 defaults:
   run:
-    working-directory: environments/global
+    working-directory: terraform/environments/global
 
 jobs:
   plan:
@@ -64,7 +64,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const plan = fs.readFileSync('environments/global/plan_output.txt', 'utf8').slice(-60000);
+            const plan = fs.readFileSync('terraform/environments/global/plan_output.txt', 'utf8').slice(-60000);
             github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
@@ -76,7 +76,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: global-tfplan
-          path: environments/global/tfplan
+          path: terraform/environments/global/tfplan
           retention-days: 5
 
   apply:

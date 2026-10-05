@@ -7,9 +7,9 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-LOCATION="uaen"
+LOCATION="uaenorth"
 RG_NAME="rg-tfstate-uaen-01"
-SA_NAME="sttfstateuaen01"   # must be globally unique, lowercase, <=24 chars
+SA_NAME="sttfstateuaen0123"   # must be globally unique, lowercase, <=24 chars
 CONTAINER_NAME="tfstate"
 
 echo "Logging in (uses your current az cli session / az login)..."

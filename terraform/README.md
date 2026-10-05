@@ -1,0 +1,93 @@
+# Viwell Azure Infrastructure — Terraform
+
+## One-time setup (do these before the first pipeline run)
+
+### 1. Create the remote state storage account
+```bash
+az login
+bash bootstrap/create-state-storage.sh
+```
+Creates `rg-tfstate-uaenorth-01` / `sttfstateuaenorth01` / container `tfstate`,
+with blob versioning and 30-day soft delete enabled.
+
+### 2. Add OIDC to your existing service principal
+You already have an App Registration — add federated credentials to that
+same one rather than creating a new one. Follow
+**`bootstrap/MANUAL_APP_REGISTRATION_SETUP.md`** for the exact federated
+credential subject strings the workflows require (these must match
+precisely, or the OIDC token exchange fails at runtime), plus which values
+go where in GitHub repo settings. Once confirmed working, the client secret
+is no longer needed and can be deleted.
+
+### 3. Configure GitHub repo settings
+**Variables** (Settings → Secrets and variables → Actions → Variables — not
+secret, since OIDC needs no client secret):
+| Name | Value |
+|---|---|
+| `AZURE_CLIENT_ID` | your service principal's client ID |
+| `AZURE_TENANT_ID` | your tenant ID |
+| `AZURE_SUBSCRIPTION_ID` | your subscription ID |
+
+Private DNS zones for PostgreSQL and Redis (`privatelink.postgres.database.azure.com`,
+`privatelink.redis.cache.windows.net`) are now created and linked by Terraform
+itself (`modules/private-dns-zone`) — no manual `az` commands or GitHub
+variables needed for these anymore.
+
+**Secrets** (same location, Secrets tab):
+| Name | Value |
+|---|---|
+| `STAGING_POSTGRES_ADMIN_PASSWORD` | strong password, staging DB |
+| `PRODUCTION_POSTGRES_ADMIN_PASSWORD` | strong password, prod DB |
+
+You can remove `AZURE_CLIENT_SECRET` if you'd already added it — it's no
+longer used once OIDC is in place.
+
+**Environments** (Settings → Environments):
+- Create `hub` — no protection rules needed; hub changes are infrequent
+  (shared VNet/subnets) and auto-apply on merge like staging.
+- Create `staging` — no protection rules needed, or a light one if you prefer.
+- Create `production` — add **at least one required reviewer**. This is what
+  makes `terraform apply` pause for manual approval on production changes.
+
+## How the pipelines work
+
+- **`.github/workflows/terraform-hub.yml`** — same plan/apply pattern as
+  staging. Runs on pushes/PRs touching `environments/hub/**` or `modules/**`.
+  Applies automatically on merge to `main` (Environment `hub`, no approval
+  gate) since it only manages shared networking.
+- **`.github/workflows/terraform-staging.yml`** — runs on GitHub-hosted
+  `ubuntu-latest` runners. Pull requests touching `environments/staging/**`
+  or `modules/**` get a `terraform plan` posted as a PR comment. Merging to
+  `main` triggers `terraform apply` automatically (environment `staging`,
+  no approval gate).
+- **`.github/workflows/terraform-production.yml`** — same plan-on-PR flow,
+  but the apply job runs under the `production` GitHub Environment, so it
+  **pauses for manual approval** before touching production.
+- Both use `permissions: id-token: write` and `ARM_USE_OIDC: "true"` — no
+  client secret is stored or transmitted anywhere.
+
+## Local development
+
+```bash
+cp backend-config.hcl.example backend-config.hcl   # gitignored, edit if needed
+az login
+cd environments/staging
+terraform init -backend-config=../../backend-config.hcl
+export TF_VAR_subscription_id="<sub-id>"
+export TF_VAR_postgres_administrator_password="<local-secret>"
+terraform plan
+```
+Local auth falls back to `az login` (Azure CLI auth) since `use_oidc = true`
+only activates when the OIDC environment variables GitHub Actions sets are
+present; locally, the provider uses your `az` session instead.
+
+## Repo layout
+```
+modules/            # reusable resource modules
+environments/
+  hub/               # shared hub VNet
+  staging/           # non-prod workloads
+  production/        # prod workloads, zone-resilient
+bootstrap/           # one-time az cli setup scripts (not run by CI)
+.github/workflows/   # CI/CD pipelines
+```
